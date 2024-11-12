@@ -29,6 +29,21 @@ public struct DiscriminatedEnumMacro: ExtensionMacro {
             enumCaseElement.name.text
         }
         
+        let visibilityKeywords: Set<SwiftSyntax.Keyword> = [.public, .internal, .private, .open]
+        
+        let visibility = enumDeclaration.modifiers.compactMap { mod in
+            switch mod.name.tokenKind {
+            case .keyword(let keyword):
+                if visibilityKeywords.contains(keyword) {
+                    return DeclModifierSyntax(name: TokenSyntax(.keyword(keyword), presence: .present))
+                } else {
+                    return nil
+                }
+            default:
+                return nil
+            }
+        }.first
+        
         let declSyntax: DeclSyntax =
             """
             extension \(type.trimmed): Decodable {
@@ -40,7 +55,7 @@ public struct DiscriminatedEnumMacro: ExtensionMacro {
                     case \(raw: caseNames.map { "\($0) = \"\($0.camelCaseToPascalCase())\"" } .joined(separator: ", "))
                 }
                 
-                init(from decoder: any Decoder) throws {
+                \(visibility)\(raw: visibility == nil ? "" : " ")init(from decoder: any Decoder) throws {
                     let container = try decoder.container(keyedBy: CodingKeys.self)
                     let tag = try container.decode(Discriminator.self, forKey: .tag)
                     switch tag {

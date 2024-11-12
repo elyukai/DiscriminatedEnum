@@ -55,6 +55,45 @@ final class DiscriminatedEnumTests: XCTestCase {
             """,
             macros: testMacros
         )
+        assertMacroExpansion(
+            """
+            @DiscriminatedEnum
+            public enum Test {
+                case hello, reallyCamel
+                case world(Int)
+            }
+            """,
+            expandedSource: """
+            public enum Test {
+                case hello, reallyCamel
+                case world(Int)
+            }
+            
+            extension Test: Decodable {
+                private enum CodingKeys: String, CodingKey {
+                    case tag, hello = "hello", reallyCamel = "really_camel", world = "world"
+                }
+
+                private enum Discriminator: String, Decodable {
+                    case hello = "Hello", reallyCamel = "ReallyCamel", world = "World"
+                }
+
+                public init(from decoder: any Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    let tag = try container.decode(Discriminator.self, forKey: .tag)
+                    switch tag {
+                        case .hello:
+                        self = .hello
+                        case .reallyCamel:
+                        self = .reallyCamel
+                        case .world:
+                        self = .world(try container.decode(Int.self, forKey: .world))
+                    }
+                }
+            }
+            """,
+            macros: testMacros
+        )
         #else
         throw XCTSkip("macros are only supported when running tests for the host platform")
         #endif
