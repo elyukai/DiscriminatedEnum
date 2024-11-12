@@ -7,5 +7,5 @@
 ///     #stringify(x + y)
 ///
 /// produces a tuple `(x + y, "x + y")`.
-@freestanding(expression)
-public macro stringify<T>(_ value: T) -> (T, String) = #externalMacro(module: "DiscriminatedEnumMacros", type: "StringifyMacro")
+@attached(extension, conformances: Decodable, names: named(init(from:)), named(CodingKeys), named(Discriminator))
+public macro DiscriminatedEnum() = #externalMacro(module: "DiscriminatedEnumMacros", type: "DiscriminatedEnumMacro")

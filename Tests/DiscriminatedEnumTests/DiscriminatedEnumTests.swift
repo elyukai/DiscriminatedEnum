@@ -9,7 +9,7 @@ import XCTest
 import DiscriminatedEnumMacros
 
 let testMacros: [String: Macro.Type] = [
-    "stringify": StringifyMacro.self,
+    "stringify": DiscriminatedEnumMacro.self,
 ]
 #endif
 
