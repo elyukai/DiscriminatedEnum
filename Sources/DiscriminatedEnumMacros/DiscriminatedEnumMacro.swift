@@ -3,7 +3,6 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-///
 public struct DiscriminatedEnumMacro: ExtensionMacro {
     public static func expansion(of node: AttributeSyntax,
                                  attachedTo declaration: some DeclGroupSyntax,
@@ -32,7 +31,7 @@ public struct DiscriminatedEnumMacro: ExtensionMacro {
         
         let declSyntax: DeclSyntax =
             """
-            extension \(type.trimmed): \(raw: protocols.map { $0.description }.joined(separator: ", ")) {
+            extension \(type.trimmed): Decodable {
                 private enum CodingKeys: String, CodingKey {
                     case tag, \(raw: caseNames.map { "\($0) = \"\($0.camelCaseToSnakeCase())\"" } .joined(separator: ", "))
                 }
@@ -61,20 +60,9 @@ public struct DiscriminatedEnumMacro: ExtensionMacro {
             """
         
         return [
-            declSyntax.as(ExtensionDeclSyntax.self)!
+            ExtensionDeclSyntax(declSyntax)!
         ]
     }
-    
-//    public static func expansion(
-//        of node: MacroExpansionDeclSyntax,
-//        in context: some MacroExpansionContext
-//    ) -> EnumDeclSyntax {
-//        guard let argument = node. else {
-//            fatalError("compiler bug: the macro does not have any arguments")
-//        }
-//
-//        return "(\(argument), \(literal: argument.description))"
-//    }
 }
 
 extension String {
@@ -98,8 +86,6 @@ extension String {
         return self.first!.uppercased() + self.dropFirst()
     }
 }
-
-
 
 @main
 struct DiscriminatedEnumPlugin: CompilerPlugin {

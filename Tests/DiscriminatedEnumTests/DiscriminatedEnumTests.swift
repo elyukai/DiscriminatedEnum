@@ -9,7 +9,7 @@ import XCTest
 import DiscriminatedEnumMacros
 
 let testMacros: [String: Macro.Type] = [
-    "stringify": DiscriminatedEnumMacro.self,
+    "DiscriminatedEnum": DiscriminatedEnumMacro.self,
 ]
 #endif
 
@@ -18,27 +18,41 @@ final class DiscriminatedEnumTests: XCTestCase {
         #if canImport(DiscriminatedEnumMacros)
         assertMacroExpansion(
             """
-            #stringify(a + b)
+            @DiscriminatedEnum
+            enum Test {
+                case hello, reallyCamel
+                case world(Int)
+            }
             """,
             expandedSource: """
-            (a + b, "a + b")
-            """,
-            macros: testMacros
-        )
-        #else
-        throw XCTSkip("macros are only supported when running tests for the host platform")
-        #endif
-    }
+            enum Test {
+                case hello, reallyCamel
+                case world(Int)
+            }
+            
+            extension Test: Decodable {
+                private enum CodingKeys: String, CodingKey {
+                    case tag, hello = "hello", reallyCamel = "really_camel", world = "world"
+                }
 
-    func testMacroWithStringLiteral() throws {
-        #if canImport(DiscriminatedEnumMacros)
-        assertMacroExpansion(
-            #"""
-            #stringify("Hello, \(name)")
-            """#,
-            expandedSource: #"""
-            ("Hello, \(name)", #""Hello, \(name)""#)
-            """#,
+                private enum Discriminator: String, Decodable {
+                    case hello = "Hello", reallyCamel = "ReallyCamel", world = "World"
+                }
+
+                init(from decoder: any Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    let tag = try container.decode(Discriminator.self, forKey: .tag)
+                    switch tag {
+                        case .hello:
+                        self = .hello
+                        case .reallyCamel:
+                        self = .reallyCamel
+                        case .world:
+                        self = .world(try container.decode(Int.self, forKey: .world))
+                    }
+                }
+            }
+            """,
             macros: testMacros
         )
         #else
