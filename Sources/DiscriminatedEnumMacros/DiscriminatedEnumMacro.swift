@@ -1,4 +1,5 @@
 import SwiftCompilerPlugin
+import SwiftDiagnostics
 import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
@@ -9,74 +10,116 @@ public struct DiscriminatedEnumMacro: ExtensionMacro {
                                  providingExtensionsOf type: some TypeSyntaxProtocol,
                                  conformingTo protocols: [TypeSyntax],
                                  in context: some MacroExpansionContext) throws -> [ExtensionDeclSyntax] {
-        guard let enumDeclaration = declaration as? EnumDeclSyntax else {
-            fatalError("The macro can only be attached to an enum declaration.")
+        guard let enumDecl = declaration as? EnumDeclSyntax else {
+            let enumError = Diagnostic(
+                node: node,
+                message: DiscriminatedEnumError.onlyApplicableToEnum
+            )
+            context.diagnose(enumError)
+            return []
         }
         
-        let cases = enumDeclaration.memberBlock.members.compactMap { member in
-            EnumCaseDeclSyntax(member.decl)
+        let arguments = node.arguments?.as(LabeledExprListSyntax.self)
+//        
+        let discriminatorKey = arguments?.first(where: { $0.label?.text == "discriminatorKey" }).map { StringLiteralExprSyntax($0.expression) } ?? StringLiteralExprSyntax(content: "tag")
+        
+        let members = enumDecl.memberBlock.members
+        let caseDecls = members.compactMap { $0.decl.as(EnumCaseDeclSyntax.self) }
+        let elements = caseDecls.flatMap { $0.elements }
+        
+        guard !elements.isEmpty else {
+            let caseError = Diagnostic(
+                node: declaration,
+                message: DiscriminatedEnumError.atLeastOneCase
+            )
+            context.diagnose(caseError)
+            return []
         }
         
-        guard !cases.isEmpty else {
-            fatalError("The enum declaration must contain at least one case.")
+        for element in elements {
+            if let parameterClause = element.parameterClause,
+               parameterClause.parameters.count > 1 || parameterClause.parameters.first!.firstName != nil {
+                let associatedTypeError = Diagnostic(
+                    node: parameterClause,
+                    message: DiscriminatedEnumError.invalidAssociatedType
+                )
+                context.diagnose(associatedTypeError)
+                return []
+            }
         }
         
-        let caseElements: [EnumCaseElementSyntax] = cases.flatMap { enumCaseDeclaration in
-            enumCaseDeclaration.elements
-        }
-        
-        let caseNames = caseElements.map { enumCaseElement in
-            enumCaseElement.name.text
-        }
-        
-        let visibilityKeywords: Set<SwiftSyntax.Keyword> = [.public, .internal, .private, .open]
-        
-        let visibility = enumDeclaration.modifiers.compactMap { mod in
+        let visibility = enumDecl.modifiers.filter { mod in
             switch mod.name.tokenKind {
             case .keyword(let keyword):
-                if visibilityKeywords.contains(keyword) {
-                    return DeclModifierSyntax(name: TokenSyntax(.keyword(keyword), presence: .present))
-                } else {
-                    return nil
-                }
+                [.public, .internal, .private, .open].contains(keyword)
             default:
-                return nil
+                false
             }
-        }.first
+        }
         
-        let declSyntax: DeclSyntax =
-            """
-            extension \(type.trimmed): Decodable {
-                private enum CodingKeys: String, CodingKey {
-                    case tag, \(raw: caseNames.map { "\($0) = \"\($0.camelCaseToSnakeCase())\"" } .joined(separator: ", "))
-                }
-            
-                private enum Discriminator: String, Decodable {
-                    case \(raw: caseNames.map { "\($0) = \"\($0.camelCaseToPascalCase())\"" } .joined(separator: ", "))
-                }
+        let extensionDecl = try ExtensionDeclSyntax("extension \(type.trimmed): Decodable") {
+            try EnumDeclSyntax("private enum CodingKeys: String, CodingKey") {
+                try EnumCaseDeclSyntax("case tag = \(discriminatorKey)")
                 
-                \(visibility)\(raw: visibility == nil ? "" : " ")init(from decoder: any Decoder) throws {
-                    let container = try decoder.container(keyedBy: CodingKeys.self)
-                    let tag = try container.decode(Discriminator.self, forKey: .tag)
-                    switch tag {
-                        \(raw: caseElements.map {
-                            if let parameterClause = $0.parameterClause  {
-                                guard parameterClause.parameters.count == 1 && parameterClause.parameters.first!.firstName == nil else {
-                                    fatalError("A case with associated values may only have one unnamed parameter.")
-                                }
-                                return "case .\($0.name.text): self = .\($0.name.text)(try container.decode(\(parameterClause.parameters.first!.type.description).self, forKey: .\($0.name.text)))"
-                            } else {
-                                return "case .\($0.name.text): self = .\($0.name.text)"
-                            }
-                        }.joined(separator: "\n            "))
+                for element in elements {
+                    try EnumCaseDeclSyntax("case \(element.name) = \"\(raw: element.name.text.camelCaseToSnakeCase())\"")
+                }
+            }
+            
+            try EnumDeclSyntax("private enum Discriminator: String, Decodable") {
+                for element in elements {
+                    try EnumCaseDeclSyntax("case \(element.name) = \"\(raw: element.name.text.camelCaseToPascalCase())\"")
+                }
+            }
+            
+            try InitializerDeclSyntax("\(raw: visibility.map { $0.description + " " }.joined(separator: ""))init(from decoder: any Decoder) throws") {
+                try VariableDeclSyntax("let container = try decoder.container(keyedBy: CodingKeys.self)")
+                try VariableDeclSyntax("let tag = try container.decode(Discriminator.self, forKey: .tag)")
+                
+                try SwitchExprSyntax("switch tag") {
+                    for element in elements {
+                        if let parameterClause = element.parameterClause,
+                           let firstParameter = parameterClause.parameters.first {
+                                SwitchCaseSyntax(
+                                    """
+                                    case .\(element.name): 
+                                        self = .\(element.name)(try container.decode(\(raw: firstParameter.type.description).self, forKey: .\(element.name)))
+                                    """
+                                )
+                        } else {
+                            SwitchCaseSyntax(
+                                """
+                                case .\(element.name):
+                                    self = .\(element.name)
+                                """
+                            )
+                        }
                     }
                 }
             }
-            """
+        }
         
-        return [
-            ExtensionDeclSyntax(declSyntax)!
-        ]
+        return [extensionDecl]
+    }
+}
+
+enum DiscriminatedEnumError: String, DiagnosticMessage {
+    case onlyApplicableToEnum
+    case atLeastOneCase
+    case invalidAssociatedType
+    
+    var severity: DiagnosticSeverity { return .error }
+    
+    var message: String {
+        switch self {
+        case .onlyApplicableToEnum: return "'@DiscriminatedEnum' can only be applied to an 'enum'"
+        case .atLeastOneCase: return "The enumeration must define at least one case."
+        case .invalidAssociatedType: return "A case with associated values may only have one parameter, which must be unnamed."
+        }
+    }
+    
+    var diagnosticID: MessageID {
+        MessageID(domain: "DiscriminatedEnumMacros", id: rawValue)
     }
 }
 
