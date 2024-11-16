@@ -58,6 +58,43 @@ final class DiscriminatedEnumTests: XCTestCase {
         assertMacroExpansion(
             """
             @DiscriminatedEnum
+            enum Test {
+                case commonSuggestedByRCP
+                case world(Int)
+            }
+            """,
+            expandedSource: """
+            enum Test {
+                case commonSuggestedByRCP
+                case world(Int)
+            }
+            
+            extension Test: Decodable {
+                private enum CodingKeys: String, CodingKey {
+                    case tag, commonSuggestedByRCP = "common_suggested_by_rcp", world = "world"
+                }
+
+                private enum Discriminator: String, Decodable {
+                    case commonSuggestedByRCP = "CommonSuggestedByRCP", world = "World"
+                }
+
+                init(from decoder: any Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    let tag = try container.decode(Discriminator.self, forKey: .tag)
+                    switch tag {
+                        case .commonSuggestedByRCP:
+                        self = .commonSuggestedByRCP
+                        case .world:
+                        self = .world(try container.decode(Int.self, forKey: .world))
+                    }
+                }
+            }
+            """,
+            macros: testMacros
+        )
+        assertMacroExpansion(
+            """
+            @DiscriminatedEnum
             public enum Test {
                 case hello, reallyCamel
                 case world(Int)

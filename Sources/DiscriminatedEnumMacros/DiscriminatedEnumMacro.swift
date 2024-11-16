@@ -128,11 +128,11 @@ extension String {
         guard !self.isEmpty else { return self }
         
         let withSimpleTransformed = self.replacing(/([A-Z][a-z])/) { match in
-            "_\(self[match.range].lowercased())"
+            "_\(match.output.1.lowercased())"
         }
         
         let withAllCapsTransformed = withSimpleTransformed.replacing(/([A-Z]+)/) { match in
-            "_\(self[match.range].lowercased())"
+            "_\(match.output.1.lowercased())"
         }
         
         return withAllCapsTransformed
